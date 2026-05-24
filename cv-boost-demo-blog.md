@@ -1,76 +1,76 @@
-# C++ 跨平台 CI/CD 血淚史：CMake + Conan + GitHub Actions 的十二道陷阱
+# C++ 跨平台 CI/CD 血泪史：CMake + Conan + GitHub Actions 的十二道陷阱
 
 ## 前言
 
-說來慚愧，我原本只是想讓一個小小的 C++ 專案可以在 Windows 和 Linux 上面同時編譯通過。這項目很簡單：用 OpenCV 處理圖像，用 Boost 做效能優化，C++17 標準，本來應該一天就能搞定的事，結果我折騰了整整兩週。
+说来惭愧，我原本只是想让一个小的 C++ 项目可以在 Windows 和 Linux 上面同时编译通过。这项目很简单：用 OpenCV 处理图像，用 Boost 做效能优化，C++17 标准，本来应该一天就能搞定的事，结果我折腾了整整两周。
 
-這篇文章我要把整個過程中踩過的每一個坑都記錄下來，包括錯誤訊息、根本原因、以及最終的解法。希望後人不要重蹈我的覆轍。
+这篇文章我要把整个过程中踩过的每一个坑都记录下来，包括错误信息、根本原因、以及最终的解法。希望后人不要重蹈我的覆辙。
 
 ---
 
-## 第一階段：vcpkg 的坑
+## 第一阶段：vcpkg 的坑
 
-一切從 Termux 說起。那時候我人在外面，手邊只有一台 Android 手機，裝了 Termux 環境。想說先在行動裝置上把專案跑起來，結果這個決定開啟了為期兩天的地獄。
+一切从 Termux 说起。那时候我人在外面，手边只有一台 Android 手机，装了 Termux 环境。想先在行动设备上把项目跑起来，结果这个决定开启了为期两天的地狱。
 
-### bootstrap-vcpkg.sh 的 TLS 錯誤
+### bootstrap-vcpkg.sh 的 TLS 错误
 
-一開始我想用 vcpkg 來管理依賴。下了 vcpkg 原始碼，執行 `./bootstrap-vcpkg.sh`，然後就爆了：
+一开始我想用 vcpkg 来管理依赖。下了 vcpkg 源码，执行 `./bootstrap-vcpkg.sh`，然后就爆了：
 
 ```
 curl#60 - SSL/TLS handshake failed
 ```
 
-折騰半天才找到原因：Termux 的 `libcurl.so` 是用 **no TLS backend** 編譯的，也就是說根本沒有 SSL 支持，所以沒辦法跟 GitHub 伺服器建立 HTTPS 連線。
+折腾半天才找到原因：Termux 的 `libcurl.so` 是用 **no TLS backend** 编译的，也就是说根本没有 SSL 支持，所以没办法跟 GitHub 服务器建立 HTTPS 连接。
 
-### 從源碼編譯也沒救
+### 从源码编译也没救
 
-我想，那就直接從源碼編譯 vcpkg 好了，反正它也有離線模式。
+我想，那就直接从源码编译 vcpkg 好了，反正它也有离线模式。
 
 ```bash
-# 嘗試編譯 vcpkg
+# 尝试编译 vcpkg
 git clone https://github.com/microsoft/vcpkg
 ./bootstrap-vcpkg.sh -disableMetrics
 ```
 
-結果編譯過程中冒出更多函式庫連結的問題。折騰到一半我放棄了——在 Termux 上面折騰 vcpkg 完全是在浪費時間。
+结果编译过程中冒出更多函数库链接的问题。折腾到一半我放弃了——在 Termux 上面折腾 vcpkg 完全是在浪费时间。
 
-### 果斷放棄，改用 Conan
+### 果敢放弃，改用 Conan
 
-我意識到在 Linux 環境下，**Conan** 是更合理的選擇。Conan 是專門做 C++ 依賴管理的工具，官方對 Linux 的支援也比 vcpkg 更好。最重要的是，Conan 2.x 已經正式 release，社群活跃文檔也齊全。
+我意识到在 Linux 环境下，**Conan** 是更合理的选择。Conan 是专门做 C++ 依赖管理的工具，官方对 Linux 的支持也比 vcpkg 更好。最重要的是，Conan 2.x 已经正式 release，社群活跃文档也齐全。
 
-> 這個階段的教訓：在非主流環境（Termux）上面做事，要先確認工具鏈的相容性，否則就是在浪費生命。
+> 这个阶段的教训：在非主流环境（Termux）上面做事，要先确认工具链的兼容性，否则就是在浪费时间。
 
 ---
 
-## 第二階段：Conan 入門——語法地獄
+## 第二阶段：Conan 入门——语法地狱
 
-從 vcpkg 切換到 Conan 以為會很順利，結果我立刻就撞牆了。
+从 vcpkg 切换到 Conan 以为会很顺利，结果我立刻就撞墙了。
 
-### Conan 2.x vs 1.x 語法差異
+### Conan 2.x vs 1.x 语法差异
 
-Conan 1.x 時代，指定 build type 要用冒號：
+Conan 1.x 时代，指定 build type 要用冒号：
 
 ```bash
 conan install . --settings:build_type=Release
 ```
 
-升級到 Conan 2.x 之後，這種語法直接失效：
+升级到 Conan 2.x 之后，这种语法直接失效：
 
 ```
 ERROR: Unknown argument --settings:build_type
 ```
 
-正確姿勢是**用空白分隔**：
+正确姿势是**用空白分隔**：
 
 ```bash
 conan install . --settings build_type=Release
 ```
 
-或者更懶惰的做法：壓根別加這個參數，因為 Conan 2.x **預設就是 Release**，完全不需要指定。
+或者更懒惰的做法：压根别加这个参数，因为 Conan 2.x **预设就是 Release**，完全不需要指定。
 
-### 我的第一個 CI workflow 就這樣爆了
+### 我的第一个 CI workflow 就这样爆了
 
-那時候我寫了第一版的 GitHub Actions workflow，大致上是這樣：
+那时候我写了第一版的 GitHub Actions workflow，大致上是这样的：
 
 ```yaml
 - name: Install Conan packages
@@ -78,64 +78,64 @@ conan install . --settings build_type=Release
     conan install . --settings:build_type=Release --build=missing
 ```
 
-結果在 CI 上面瘋狂報錯，我還以為是網路問題、CI 環境問題，根本沒想到是語法被改了。
+结果在 CI 上面疯狂报错，我还以为是网络问题、CI 环境问题，根本没想到是语法被改了。
 
-> 這個階段的教訓：Conan 2.x 跟 1.x 的語法幾乎是兩套語言，升級之前要先確認文件用的是哪個版本。
+> 这个阶段的教训：Conan 2.x 跟 1.x 的语法几乎是两套语言，升级之前要先确认文件用的是哪个版本。
 
 ---
 
-## 第三階段：opencv/4.9.0 的 Android API bug
+## 第三阶段：opencv/4.9.0 的 Android API bug
 
-在本地端折騰得差不多的時候，我想說試用新版的 opencv，結果又踩到一個非常隱晦的 bug。
+在本地端折腾得差不多的时候，我想试试新版的 opencv，结果又踩到一个非常隐晦的 bug。
 
 ### ValueError: invalid literal for int() with base 10: 'None'
 
-當時我用的是 `opencv/4.9.0`，在 Termux（Android）環境下執行 `conan install` 直接噴這個錯誤：
+当时我用的是 `opencv/4.9.0`，在 Termux（Android）环境下执行 `conan install` 直接喷这个错误：
 
 ```
 ERROR: conans.errors.ConanException: ValueError: invalid literal for int() with base 10: 'None'
 ```
 
-錯誤訊息完全看不懂，Stack Overflow 也找不到。只好去看 Conan Center 的原始碼。
+错误信息完全看不懂，Stack Overflow 也找不到。只好去看 Conan Center 的源码。
 
 ### 根本原因
 
-問題出在 opencv 的 `conanfile.py` 裡面的 `configure()` 函式：
+问题出在 opencv 的 `conanfile.py` 里面的 `configure()` 函数：
 
 ```python
 def configure(self):
     super().configure()
-    # 這行有問題：
+    # 这行有问题：
     self.settings.os.api_level = int(self.settings.os.api_level)
 ```
 
-當執行環境是 Termux/Android 時，`self.settings.os.api_level` 的值是 **`None`**（因為 Termux 不像真正的 Android 有 API level），所以 `int(None)` 直接噴 ValueError。
+当执行环境是 Termux/Android 时，`self.settings.os.api_level` 的值是 **`None`**（因为 Termux 不像真正的 Android 有 API level），所以 `int(None)` 直接喷 ValueError。
 
-### 解法：降級到 opencv/4.5.5
+### 解法：降级到 opencv/4.5.5
 
-既然 opencv/4.9.0 有這個 bug，我果斷降級：
+既然 opencv/4.9.0 有这个 bug，我果敢降级：
 
 ```
 opencv/4.5.5
 ```
 
-這個版本沒有這個問題，而且功能也足夠用。4.5.5 是 2022 年發布的穩定版本，一直到 2025 年還有人在用，社群也穩定。
+这个版本没有这个问题，而且功能也足够用。4.5.5 是 2022 年发布的稳定版本，一直到 2025 年还有人在用，社群也稳定。
 
-> 這個階段的教訓：不要盲目追求最新版本。新版本可能隱藏了 regression bug，穩定版才是 production 的好朋友。
+> 这个阶段的教训：不要盲目追求最新版本。新版本可能隐藏了 regression bug，稳定版才是 production 的好朋友。
 
 ---
 
-## 第四階段：CMake 找不到 OpenCV——CMAKE_PREFIX_PATH 之謎
+## 第四阶段：CMake 找不到 OpenCV——CMAKE_PREFIX_PATH 之谜
 
-好不容易把依賴裝好了，結果 CMake 編譯的時候跟我說找不到 OpenCV。
+好不容易把依赖装好了，结果 CMake 编译的时候跟我说找不到 OpenCV。
 
-### find_package 失敗
+### find_package 失败
 
 ```bash
 cmake --preset conan-release
 ```
 
-輸出：
+输出：
 
 ```
 CMake Error at CMakeLists.txt:12 (find_package):
@@ -143,73 +143,73 @@ CMake Error at CMakeLists.txt:12 (find_package):
   of the named targets above
 ```
 
-`find_package(OpenCV REQUIRED)` 這個指令失效了。
+`find_package(OpenCV REQUIRED)` 这个指令失效了。
 
-### 為什麼找不到？
+### 为什么找不到？
 
-折騰了半天我才搞懂：**Conan 2.x 的 CMakeDeps 產生的設定檔不會自動被 CMake 找到**。
+折腾了半天我才搞懂：**Conan 2.x 的 CMakeDeps 产生的配置文件不会自动被 CMake 找到**。
 
-Conan 2.x 的設定檔放在：
+Conan 2.x 的配置文件放在：
 
 ```
 build/generators/
 ```
 
-而 CMake 的 `find_package()` 預設只搜索：
+而 CMake 的 `find_package()` 预设只搜索：
 
 - `/usr/local/lib/cmake/`
 - `/usr/lib/cmake/`
-- ...以及CMAKE_MODULE_PATH、CMAKE_PREFIX_PATH 指定的目錄
+- ...以及CMAKE_MODULE_PATH、CMAKE_PREFIX_PATH 指定的目录
 
 所以根本找不到 `OpenCVConfig.cmake`。
 
 ### 解法：在 CMakeLists.txt 加入 CMAKE_PREFIX_PATH
 
 ```cmake
-# 在 project() 之後加入
+# 在 project() 之后加入
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_BINARY_DIR}/generators")
 
 find_package(OpenCV REQUIRED)
 ```
 
-這樣 CMake 就會去 `build/generators/` 尋找設定檔了。
+这样 CMake 就会去 `build/generators/` 寻找配置文件了。
 
-> 這個階段的教訓：Conan 2.x 的 CMake 整合方式跟 1.x 完全不同，不能用舊經驗套用新版本。
+> 这个阶段的教训：Conan 2.x 的 CMake 整合方式跟 1.x 完全不同，不能用旧经验套用新版本。
 
 ---
 
-## 第五階段：CMakeDeps 是必須加的！
+## 第五阶段：CMakeDeps 是必须加的！
 
-找到設定檔的位置之後，我興沖沖地再次執行 CMake，結果又爆了。
+找到配置文件的位置之后，我兴冲冲地再次执行 CMake，结果又爆了。
 
-### 問題：`OpenCVConfig.cmake` 不存在
+### 问题：`OpenCVConfig.cmake` 不存在
 
 ```
 Could not find a package configuration file provided by "OpenCV" with any
 of the named targets above
 ```
 
-我明明已經加過 `CMAKE_PREFIX_PATH` 了，怎麼還是找不到？
+我明明已经加过 `CMAKE_PREFIX_PATH` 了，怎么还是找不到？
 
-### 根本原因：CMakeToolchain 不會生成 find_package 設定檔
+### 根本原因：CMakeToolchain 不会生成 find_package 配置文件
 
-回頭檢查 `conanfile.txt`：
+回头检查 `conanfile.txt`：
 
 ```ini
 [generators]
 CMakeToolchain
 ```
 
-我只有 `CMakeToolchain`！這就是問題所在：
+我只有 `CMakeToolchain`！这就是问题所在：
 
 | Generator | 功能 |
 |-----------|------|
-| `CMakeToolchain` | 產生 toolchain 檔案、編譯器設定、編譯選項 |
-| `CMakeDeps` | 產生 `FindXXX.cmake` 或 `XXXConfig.cmake` 設定檔 |
+| `CMakeToolchain` | 产生 toolchain 文件、编译器设定、编译选项 |
+| `CMakeDeps` | 产生 `FindXXX.cmake` 或 `XXXConfig.cmake` 配置文件 |
 
-**`CMakeToolchain` 只負責設定編譯器環境，它不會產生任何 find_package 設定檔！**
+**`CMakeToolchain` 只负责设定编译器环境，它不会产生任何 find_package 配置文件！**
 
-### 解法：兩個 generator 都要加
+### 解法：两个 generator 都要加
 
 ```ini
 [generators]
@@ -217,25 +217,25 @@ CMakeToolchain
 CMakeDeps
 ```
 
-然後重新執行：
+然后重新执行：
 
 ```bash
 conan install . --output-folder=build --build=missing
 ```
 
-這次 `OpenCVConfig.cmake` 終於出現了！
+这次 `OpenCVConfig.cmake` 终于出现了！
 
-> 這個階段的教訓：Conan 2.x 的 generator 機制是模組化的，每個 generator 只做一件事。要設定編譯環境需要 `CMakeToolchain`，要產生 find_package 檔案需要 `CMakeDeps`，兩者缺一不可。
+> 这个阶段的教训：Conan 2.x 的 generator 机制是模组化的，每个 generator 只做一件事。要设定编译环境需要 `CMakeToolchain`，要产生 find_package 文件需要 `CMakeDeps`，两者缺一不可。
 
 ---
 
-## 第六階段：GitHub Actions 緩存策略—— artifact 根本不靠譜
+## 第六阶段：GitHub Actions 缓存策略—— artifact 根本不靠谱
 
-CI 終於可以在本地端編譯了，於是我開始寫 GitHub Actions workflow。這時候又遇到了新的問題：緩存策略。
+CI 终于可以在本地端编译了，于是我开始写 GitHub Actions workflow。这时候又遇到了新的问题：缓存策略。
 
-### 最初的策略：上傳 artifact
+### 最初的策略：上传 artifact
 
-我一開始的想法是這樣的：
+一开始我的想法是这样的：
 
 ```yaml
 jobs:
@@ -263,17 +263,17 @@ jobs:
           name: build-linux
 ```
 
-理論上這樣可以把 Linux build 的產物下載下來給 Windows 用，節省編譯時間。
+理论上这样可以把 Linux build 的产物下载下来给 Windows 用，节省编译时间。
 
-### Artifact 的下載路徑問題
+### Artifact 的下载路径问题
 
-結果 artifact 下載下來之後，路徑完全對不上。GitHub Actions 的 artifact 下載會把檔案放到一個 UUID 命名的目錄裡面，根本不是原來的 `build/` 路徑結構。
+结果 artifact 下载下来之后，路径完全对不上。GitHub Actions 的 artifact 下载会把文件放到一个 UUID 命名的目录里面，根本不是原来的 `build/` 路径结构。
 
-折騰了半天，我放棄了 artifact 策略。
+折腾了半天，我放弃了 artifact 策略。
 
-### 更好的方案：緩存 ~/.conan2
+### 更好的方案：缓存 ~/.conan2
 
-最終我改成緩存**整個 Conan 本地庫**：
+最终我改成缓存**整个 Conan 本地库**：
 
 ```yaml
 - name: Cache Conan packages
@@ -286,36 +286,36 @@ jobs:
       conan2-${{ runner.os }}-
 ```
 
-這樣每一個 job 都可以共享同一個 Conan 緩存，無需手動搬運 artifact。
+这样每一个 job 都可以共享同一个 Conan 缓存，无需手动搬运 artifact。
 
-> 這個階段的教訓：GitHub Actions artifact 的設計是給一般產物用的，不適合用來共享編譯緩存。直接緩存對應的目錄（如 `~/.conan2`）才是正確做法。
+> 这个阶段的教训：GitHub Actions artifact 的设计是给一般产物用的，不适合用来共享编译缓存。直接缓存对应的目录（如 `~/.conan2`）才是正确做法。
 
 ---
 
-## 第七階段：Windows/Linux preset 名稱統一問題
+## 第七阶段：Windows/Linux preset 名称统一问题
 
-CI 跑起來之後，我發現另一個問題：Windows 和 Linux 的 preset 名稱不一致。
+CI 跑起来之后，我发现另一个问题：Windows 和 Linux 的 preset 名称不一致。
 
 ### Windows 用 `conan-default`，Linux 用 `conan-release`
 
-一開始我以為是正常的，因為 Windows 用 Visual Studio 而 Linux 用 Ninja，Conan 產生的 preset 名稱可能不同。
+一开始我以为是正常的，因为 Windows 用 Visual Studio 而 Linux 用 Ninja，Conan 产生的 preset 名称可能不同。
 
-結果 CMake configure 的時候噴錯：
+结果 CMake configure 的时候喷错：
 
 ```
 CMake Error: Could not find CMake preset file.
 ```
 
-### 根本原因：單一配置 vs 多元配置生成器
+### 根本原因：单一配置 vs 多元配置生成器
 
-問題在於 Conan 的 generator 設定：
+问题在于 Conan 的 generator 设定：
 
-- **Visual Studio** 是**多配置生成器**（multi-config），Conan 產生的 preset 叫 `conan-release`（只設定 Release）
-- **Ninja** 是**單一配置生成器**（single-config），Conor 產生的 preset 也叫 `conan-release`
+- **Visual Studio** 是**多配置生成器**（multi-config），Conan 产生的 preset 叫 `conan-release`（只设定 Release）
+- **Ninja** 是**单一配置生成器**（single-config），Conor 产生的 preset 也叫 `conan-release`
 
-一開始 Windows workflow 用了錯誤的 preset 名稱，導致 CMake 找不到檔案。
+一开始 Windows workflow 用了错误的 preset 名称，导致 CMake 找不到文件。
 
-### 解法：統一preset名稱為 `conan-release`
+### 解法：统一preset名称为 `conan-release`
 
 修正 workflow：
 
@@ -329,19 +329,19 @@ CMake Error: Could not find CMake preset file.
   run: cmake --preset conan-release
 ```
 
-只要在 `conanfile.txt` 設定好 `default_options`，兩邊都會產生相同名稱的 preset。
+只要在 `conanfile.txt` 设定好 `default_options`，两边都会产生相同名称的 preset。
 
-> 這個階段的教訓：Conan 2.x 搭配不同生成器時，preset 的命名規則要搞清楚。Visual Studio 多配置生成器只產生 Release 一種，Ninja 單一配置也是 Release，不能搞混。
+> 这个阶段的教训：Conan 2.x 搭配不同生成器时，preset 的命名规则要搞清楚。Visual Studio 多配置生成器只产生 Release 一种，Ninja 单一配置也是 Release，不能搞混。
 
 ---
 
-## 第八階段：PowerShell 不會报错——$ErrorActionPreference
+## 第八阶段：PowerShell 不会报错——$ErrorActionPreference
 
-CI 終於可以在兩個平台都跑了，但我注意到一個詭異的問題：CMake configure 明明失敗了，CI 卻顯示綠色通關。
+CI 终于可以在两个平台都跑了，但我注意到一个诡异的问题：CMake configure 明明失败了，CI 却显示绿色通关。
 
-### 問題：cmake --preset 失敗了，但 PowerShell 繼續執行
+### 问题：cmake --preset 失败了，但 PowerShell 继续执行
 
-當時的 workflow 大致是這樣：
+当时的 workflow 大致是这样的：
 
 ```yaml
 - name: Configure CMake
@@ -351,16 +351,16 @@ CI 終於可以在兩個平台都跑了，但我注意到一個詭異的問題�
     ctest --preset conan-release
 ```
 
-在 Windows 上面，如果 `cmake --preset` 失敗了，PowerShell **預設會繼續執行下一條指令**，根本不會中斷！
+在 Windows 上面，如果 `cmake --preset` 失败了，PowerShell **预设会继续执行下一条指令**，根本不会中断！
 
-結果就是：
-- `cmake --preset conan-release` 失敗了（找不到 preset）
-- PowerShell 假裝沒事，繼續執行 `cmake --build`
-- 當然也編譯不出東西，但 CI 就這樣假裝成功了
+结果就是：
+- `cmake --preset conan-release` 失败了（找不到 preset）
+- PowerShell 假装没事，继续执行 `cmake --build`
+- 当然也编译不出东西，但 CI 就这样假装成功了
 
-### 解法：設定 $ErrorActionPreference = "Stop"
+### 解法：设定 $ErrorActionPreference = "Stop"
 
-在 PowerShell 腳本的開頭加上：
+在 PowerShell 脚本的开头加上：
 
 ```yaml
 - name: Configure CMake
@@ -372,29 +372,29 @@ CI 終於可以在兩個平台都跑了，但我注意到一個詭異的問題�
     ctest --preset conan-release
 ```
 
-這樣只要有任何一步失敗，PowerShell 就會立即停止。
+这样只要有任何一步失败，PowerShell 就会立即停止。
 
-### 另外一個問題：ctest 報告 "No tests were found"
+### 另外一个问题：ctest 报告 "No tests were found"
 
-這個其實不是錯誤，只是我沒有寫任何測試。但當時因為前面的 cmake --build 根本沒有真正編譯到東西，所以 ctest 找不到測試案例。
+这个其实不是错误，只是我没有写任何测试。但当时因为前面的 cmake --build 根本没有真正编译到东西，所以 ctest 找不到测试案例。
 
-加上 `$ErrorActionPreference = "Stop"` 之後，這個問題也跟著解決了（因為更早就失敗了）。
+加上 `$ErrorActionPreference = "Stop"` 之后，这个问题也跟着解决了（因为更早就失败了）。
 
-> 這個階段的教訓：PowerShell 的錯誤處理機制跟 Bash 不同。Bash 預設會在命令失敗時停止，而 PowerShell 要手動設定 `$ErrorActionPreference`。在 CI 腳本中千萬不要忘記這件事。
+> 这个阶段的教训：PowerShell 的错误处理机制跟 Bash 不同。Bash 预设会在命令失败时停止，而 PowerShell 要手动设定 `$ErrorActionPreference`。在 CI 脚本中千万不要忘记这件事。
 
 ---
 
-## 第九階段：cl not found——MSVC 開發者環境
+## 第九阶段：cl not found——MSVC 开发者环境
 
-CI 基本上能跑了，但我又發現另一個問題：Windows 上面換成 Ninja 之後，編譯器找不到。
+CI 基本能跑了，但我又发现另一个问题：Windows 上面换成 Ninja 之后，编译器找不到。
 
-### 問題：切換到 Ninja 之後，cl.exe 不見了
+### 问题：切换到 Ninja 之后，cl.exe 不见了
 
-原本用 Visual Studio Generator 的時候，Conan 會自動幫我設定好 VS 開發者環境，`cl.exe` 在 PATH 裡面。
+原本用 Visual Studio Generator 的时候，Conan 会自动帮我设定好 VS 开发者环境，`cl.exe` 在 PATH 里面。
 
-但當我改成 `generator=Ninja` 之後，Conan 不再自動設定 VS 開發者環境，結果 `cl.exe` 根本不在 PATH 裡面。
+但当我改成 `generator=Ninja` 之后，Conan 不再自动设定 VS 开发者环境，结果 `cl.exe` 根本不在 PATH 里面。
 
-錯誤訊息：
+错误信息：
 
 ```
 'cl' is not recognized as an internal or external command
@@ -402,7 +402,7 @@ CI 基本上能跑了，但我又發現另一個問題：Windows 上面換成 Ni
 
 ### 解法：使用 ilammy/msvc-dev-cmd@v1
 
-在 CMake 步驟之前加入 MSVC 開發者環境初始化：
+在 CMake 步骤之前加入 MSVC 开发者环境初始化：
 
 ```yaml
 - name: Configure MSVC environment
@@ -416,58 +416,58 @@ CI 基本上能跑了，但我又發現另一個問題：Windows 上面換成 Ni
     cmake --preset conan-release
 ```
 
-`msvc-dev-cmd` 會幫你把 VS 的開發者環境設定好，包括：
-- `cl.exe` 的路徑
-- 必要的 include 目錄
-- 連結庫路徑
+`msvc-dev-cmd` 会帮你把 VS 的开发者环境设定好，包括：
+- `cl.exe` 的路径
+- 必要的 include 目录
+- 链接库路径
 
-> 這個階段的教訓：使用 Ninja 生成器時，Conan 不會幫你設定 MSVC 開發環境。Windows 上面必須手動引入 VS Developer Environment，否則 compiler 完全找不到。
+> 这个阶段的教训：使用 Ninja 生成器时，Conan 不会帮你设定 MSVC 开发环境。Windows 上面必须手动引入 VS Developer Environment，否则 compiler 完全找不到。
 
 ---
 
-## 第十階段：C++ 標準不一致——ABI 不相容
+## 第十阶段：C++ 标准不一致——ABI 不兼容
 
-所有問題都解決了，CI 終於綠了。但幾天後我發現一個隱蔽的問題：組件之間的 ABI 不相容。
+所有问题都解决了，CI 终于绿了。但几天后我发现一个隐蔽的问题：组件之间的 ABI 不兼容。
 
-### 問題：linking error 在執行期爆發
+### 问题：linking error 在执行期爆发
 
-錯誤訊息像是這樣：
+错误信息像是这样的：
 
 ```
 undefined reference to 'cv::Mat::deallocate()'
 ```
 
-這是很典型的 ABI 不相容問題。
+这是很典型的 ABI 不兼容问题。
 
 ### 根本原因：CMAKE_CXX_STANDARD 11 vs C++17
 
-回頭看 `CMakeLists.txt`：
+回头看 `CMakeLists.txt`：
 
 ```cmake
 cmake_minimum_required(VERSION 3.15)
 project(cv-boost-demo)
 
-set(CMAKE_CXX_STANDARD 11)  # 這行是問題所在！
+set(CMAKE_CXX_STANDARD 11)  # 这行是问题所在！
 ```
 
-但是 OpenCV 4.5.5 是用 C++17 編譯的。當你的程式碼用 C++11 編譯，而連結到的函式庫是用 C++17 編譯，ABI 就不相容。
+但是 OpenCV 4.5.5 是用 C++17 编译的。当你的代码用 C++11 编译，而链接到的函数库是用 C++17 编译，ABI 就不兼容。
 
-### 解法：設定為 C++17
+### 解法：设定为 C++17
 
 ```cmake
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ```
 
-`CMAKE_CXX_STANDARD_REQUIRED ON` 可以確保如果目標 compiler 不支援 C++17，CMake 會直接报错，而不是默默降級。
+`CMAKE_CXX_STANDARD_REQUIRED ON` 可以确保如果目标 compiler 不支持 C++17，CMake 会直接报错，而不是默默降级。
 
-> 這個階段的教訓：C++ 標準版本必須跟依賴函式庫保持一致。如果依賴是用 C++17 編譯的，你的專案也必須用 C++17，否則遲早會遇到 ABI 不相容的問題。
+> 这个阶段的教训：C++ 标准版本必须跟依赖函数库保持一致。如果依赖是用 C++17 编译的，你的项目也必须用 C++17，否则迟早会遇到 ABI 不兼容的问题。
 
 ---
 
-## 最終的設定檔
+## 最终的设定档
 
-經過兩週的折騰，我的最終設定如下：
+经过两周的折腾，我的最终设定如下：
 
 ### conanfile.txt
 
@@ -487,7 +487,7 @@ boost*:shared=False
 boost*:header_only=False
 ```
 
-### CMakeLists.txt（關鍵部分）
+### CMakeLists.txt（关键部分）
 
 ```cmake
 cmake_minimum_required(VERSION 3.15)
@@ -496,7 +496,7 @@ project(cv-boost-demo)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 關鍵：加入 Conan 產生的設定檔路徑
+# 关键：加入 Conan 产生的配置文件路径
 list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_BINARY_DIR}/generators")
 
 find_package(OpenCV REQUIRED)
@@ -587,36 +587,36 @@ jobs:
 
 ---
 
-## 總結：十二道陷阱
+## 总结：十二道陷阱
 
-讓我們回顧一下這十二道陷阱：
+让我们回顾一下这十二道陷阱：
 
-| 階段 | 陷阱 | 解法 |
+| 阶段 | 陷阱 | 解法 |
 |------|------|------|
-| 1 | vcpkg bootstrap TLS 錯誤 | 放棄 vcpkg，改用 Conan |
-| 2 | Conan 2.x 語法改變 | `--settings:build_type` → `--settings build_type` |
-| 3 | opencv/4.9.0 Android API bug | 降級到 opencv/4.5.5 |
+| 1 | vcpkg bootstrap TLS 错误 | 放弃 vcpkg，改用 Conan |
+| 2 | Conan 2.x 语法改变 | `--settings:build_type` → `--settings build_type` |
+| 3 | opencv/4.9.0 Android API bug | 降级到 opencv/4.5.5 |
 | 4 | CMake 找不到 OpenCV | 加入 `CMAKE_PREFIX_PATH` |
-| 5 | CMakeDeps 未設定 | `[generators]` 加入 `CMakeDeps` |
-| 6 | Artifact 緩存策略失敗 | 改為緩存 `~/.conan2` |
-| 7 | Windows/Linux preset 名稱不一致 | 統一使用 `conan-release` |
-| 8 | PowerShell 不會在錯誤時停止 | 設定 `$ErrorActionPreference = "Stop"` |
-| 9 | Ninja 生成器缺少 MSVC 環境 | 使用 `ilammy/msvc-dev-cmd@v1` |
-| 10 | C++ 標準版本不一致 | `set(CMAKE_CXX_STANDARD 17)` |
+| 5 | CMakeDeps 未设定 | `[generators]` 加入 `CMakeDeps` |
+| 6 | Artifact 缓存策略失败 | 改为缓存 `~/.conan2` |
+| 7 | Windows/Linux preset 名称不一致 | 统一使用 `conan-release` |
+| 8 | PowerShell 不会在错误时停止 | 设定 `$ErrorActionPreference = "Stop"` |
+| 9 | Ninja 生成器缺少 MSVC 环境 | 使用 `ilammy/msvc-dev-cmd@v1` |
+| 10 | C++ 标准版本不一致 | `set(CMAKE_CXX_STANDARD 17)` |
 
-### 最重要的三個 lesson
+### 最重要的三个 lesson
 
-1. **不要用 Termux 折騰編譯相關的事情** — 環境太特殊，問題會比收穫多。
+1. **不要用 Termux 折腾编译相关的事情** — 环境太特殊，问题会比收获多。
 
-2. **Conan 2.x 跟 1.x 幾乎是兩套工具** — 網路上大部分範例都是 1.x 語法，要自己轉換。
+2. **Conan 2.x 跟 1.x 几乎是两套工具** — 网络上大部分范例都是 1.x 语法，要自己转换。
 
-3. **CI 腳本要在本地測試** — 每次修改 workflow 都先在手動跑一遍，確認邏輯正確再推到 GitHub。
+3. **CI 脚本要在本地测试** — 每次修改 workflow 都先在手动的跑一遍，确认逻辑正确再推到 GitHub。
 
-希望這篇文章對你有幫助。如果你的 CI 也有類似的問題，歡迎留言討論。
+希望这篇文章对你有帮助。如果你的 CI 也有类似的问题，欢迎留言讨论。
 
 ---
 
-**相關連結：**
-- 專案網址：https://github.com/lieeesson/cv-boost-demo
+**相关连结：**
+- 项目网址：https://github.com/lieeesson/cv-boost-demo
 - Conan 官方文件：https://docs.conan.io/2/
 - CMake 官方文件：https://cmake.org/documentation/
