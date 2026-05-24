@@ -6,7 +6,8 @@ AI、嵌入式、C++、CI/CD，随想随写。
 
 | 文章 | 标签 | 日期 |
 |------|------|------|
-| [C++ 跨平台 CI/CD 血泪史：CMake + Conan + GitHub Actions 的十二道陷阱](./cv-boost-demo-blog.md) | C++ / CI/CD | 2026-05-24 |
+| [CMake + Conan + GitHub Actions 跨平台 CI 实战记录](./cmake-conan-github-actions-pitfalls.md) | C++ / CI/CD | 2026-05-24 |
+| [早期草稿：CMake + Conan + GitHub Actions 的十二道陷阱](./cv-boost-demo-blog.md)（有误导内容，仅供参考） | C++ / CI/CD | 2026-05-24 |
 
 ## 关于
 
@@ -23,8 +24,9 @@ AI、嵌入式、C++、CI/CD，随想随写。
 
 ```
 blog/
-├── README.md              # 本文件
-└── cv-boost-demo-blog.md # 第一篇：C++ 跨平台 CI 十二道陷阱
+├── README.md                                      # 本文件
+├── cmake-conan-github-actions-pitfalls.md          # 准确版本（本文）
+└── cv-boost-demo-blog.md                          # 早期草稿（有误导，仅对比参考）
 ```
 
 未来的文章会继续放在这里，一个仓库搞定所有领域喵~
